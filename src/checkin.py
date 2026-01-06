@@ -12,10 +12,38 @@ Usage:
 
 import os
 import sys
+import time
 import argparse
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
+from functools import wraps
+
+
+def retry(max_attempts: int = 3, delay: float = 2.0):
+    """重试装饰器"""
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            last_exception = None
+            for attempt in range(1, max_attempts + 1):
+                try:
+                    result = func(*args, **kwargs)
+                    if result:
+                        return result
+                    if attempt < max_attempts:
+                        print(f"[RETRY] 第 {attempt}/{max_attempts} 次尝试失败，{delay}秒后重试...")
+                        time.sleep(delay)
+                except Exception as e:
+                    last_exception = e
+                    if attempt < max_attempts:
+                        print(f"[RETRY] 第 {attempt}/{max_attempts} 次遇到异常: {e}，{delay}秒后重试...")
+                        time.sleep(delay)
+            if last_exception:
+                print(f"[ERROR] 所有重试均失败，最后异常: {last_exception}")
+            return False
+        return wrapper
+    return decorator
 
 
 class AutoCheckin:
@@ -58,9 +86,10 @@ class AutoCheckin:
 
         return None
 
+    @retry(max_attempts=3, delay=2.0)
     def login(self) -> bool:
         """
-        执行登录
+        执行登录（带重试机制）
         Returns:
             bool: 登录是否成功
         """
@@ -160,9 +189,10 @@ class AutoCheckin:
 
         return False
 
+    @retry(max_attempts=3, delay=2.0)
     def checkin(self) -> bool:
         """
-        执行签到
+        执行签到（带重试机制）
         Returns:
             bool: 签到是否成功
         """
