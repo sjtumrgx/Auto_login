@@ -19,6 +19,11 @@ import requests
 from functools import wraps
 
 
+class RateLimitError(Exception):
+    """频率限制异常，不应重试"""
+    pass
+
+
 def retry(max_attempts: int = 3, delay: float = 5.0):
     """重试装饰器"""
     def decorator(func):
@@ -33,6 +38,10 @@ def retry(max_attempts: int = 3, delay: float = 5.0):
                     if attempt < max_attempts:
                         print(f"[RETRY] 第 {attempt}/{max_attempts} 次尝试失败，{delay}秒后重试...")
                         time.sleep(delay)
+                except RateLimitError as e:
+                    # 频率限制不重试
+                    print(f"[ERROR] {e}")
+                    return False
                 except Exception as e:
                     last_exception = e
                     if attempt < max_attempts:
@@ -60,7 +69,7 @@ class DiscuzCheckin:
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
             "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-            "Origin": BASE_URL,
+            "Origin": "https://upn2.fwevasmpet.com",
         })
 
     def _decode_response(self, response: requests.Response) -> str:
@@ -69,6 +78,11 @@ class DiscuzCheckin:
 
     def _get_formhash(self, content: str) -> str:
         """从页面内容中提取 formhash"""
+        # 优先从 input 标签获取
+        match = re.search(r'name=["\']formhash["\'][^>]*value=["\']([a-f0-9]{8})["\']', content)
+        if match:
+            return match.group(1)
+        # 备用：从其他位置获取
         match = re.search(r'formhash["\s:=]+([a-f0-9]{8})', content)
         return match.group(1) if match else ""
 
@@ -144,13 +158,16 @@ class DiscuzCheckin:
             )
             content = self._decode_response(resp)
 
-            # 检查登录结果
-            if "密码错误" in content or "登录失败" in content:
-                print("[ERROR] 登录失败：密码错误或账号不存在")
+            # 检查登录结果（顺序很重要：先检查特殊情况）
+            if "密码错误次数过多" in content or "请 15 分钟后" in content:
+                raise RateLimitError("登录限制：密码错误次数过多，请 15 分钟后重新登录")
+
+            if "密码错误" in content and "次数过多" not in content:
+                print("[ERROR] 登录失败：密码错误")
                 return False
 
-            if "密码错误次数过多" in content:
-                print("[ERROR] 登录失败：密码错误次数过多，请稍后再试")
+            if "用户不存在" in content or "登录失败" in content:
+                print("[ERROR] 登录失败：账号不存在或其他错误")
                 return False
 
             if "succeedhandle" in content or "欢迎" in content or "跳转" in content:
@@ -164,6 +181,8 @@ class DiscuzCheckin:
             # 验证登录状态：访问用户中心
             return self._verify_login()
 
+        except RateLimitError:
+            raise  # 重新抛出，让重试装饰器处理
         except Exception as e:
             print(f"[ERROR] 登录请求失败: {e}")
             return False
