@@ -17,7 +17,7 @@ import requests
 class AutoCheckin:
     """自动登录签到类（登录即签到）"""
 
-    BASE_URL = "https://upn2.fwevasmpet.com"
+    BASE_URL = "https://pvew5.pver549cn.com"
     ENCODING = "gbk"
 
     def __init__(self, username: str, password: str):
