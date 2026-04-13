@@ -11,13 +11,17 @@ import os
 import sys
 import re
 import argparse
+from urllib.parse import urljoin
+
 import requests
+from bs4 import BeautifulSoup
 
 
 class AutoCheckin:
     """自动登录签到类（登录即签到）"""
 
-    BASE_URL = "https://b2kk.brs5d7fw.com"
+    PUBLISH_URL = "http://www.soushu2030.com/"
+    BASE_URL = ""
     ENCODING = "gbk"
 
     def __init__(self, username: str, password: str):
@@ -37,13 +41,75 @@ class AutoCheckin:
         match = re.search(r'name=["\']formhash["\'][^>]*value=["\']([a-f0-9]{8})["\']', content)
         return match.group(1) if match else ""
 
+    def _decode_publish_page(self, resp: requests.Response) -> str:
+        encoding = resp.encoding
+        if not encoding or encoding.lower() == "iso-8859-1":
+            encoding = resp.apparent_encoding or "utf-8"
+        return resp.content.decode(encoding, errors="ignore")
+
+    def _extract_meta_refresh_url(self, content: str, base_url: str) -> str:
+        match = re.search(
+            r'<meta[^>]+http-equiv=["\']?refresh["\']?[^>]+content=["\'][^"\']*url=([^"\'>]+)',
+            content,
+            re.IGNORECASE,
+        )
+        if not match:
+            return ""
+        return urljoin(base_url, match.group(1).strip())
+
+    def _resolve_base_url(self) -> str:
+        url = self.PUBLISH_URL
+
+        for step in range(5):
+            print(f"[INFO] 获取最新地址发布页[{step + 1}]: {url}")
+            resp = self.session.get(url, timeout=30, allow_redirects=True)
+            content = self._decode_publish_page(resp)
+
+            next_url = self._extract_meta_refresh_url(content, resp.url)
+            if next_url and next_url.rstrip("/") != resp.url.rstrip("/"):
+                url = next_url
+                continue
+
+            soup = BeautifulSoup(content, "html.parser")
+            latest_link = None
+            for link in soup.find_all("a", href=True):
+                text = link.get_text(strip=True)
+                if "最新地址" in text:
+                    latest_link = link
+                    break
+
+            if not latest_link:
+                for link in soup.find_all("a", href=True):
+                    text = link.get_text(strip=True)
+                    if "搜书吧" in text:
+                        latest_link = link
+                        break
+
+            href = latest_link.get("href") if latest_link else ""
+            if href and not href.startswith("javascript:"):
+                resolved_url = urljoin(resp.url, href).rstrip("/")
+                print(f"[INFO] 最新地址: {resolved_url}")
+                return resolved_url
+
+            raise ValueError(f"未找到最新地址链接，当前状态码: {resp.status_code}")
+
+        raise ValueError("最新地址解析超过跳转上限")
+
     def run(self) -> bool:
         """执行登录签到"""
         print("=" * 50)
         print("搜书吧自动登录签到")
-        print(f"目标: {self.BASE_URL}")
+        print(f"发布页: {self.PUBLISH_URL}")
         print(f"账号: {self.username}")
         print("=" * 50)
+
+        try:
+            self.BASE_URL = self._resolve_base_url()
+        except Exception as e:
+            print(f"[ERROR] 获取最新地址失败: {e}")
+            return False
+
+        print(f"目标: {self.BASE_URL}")
 
         # 1. 获取首页和 formhash
         print("[INFO] 获取首页...")

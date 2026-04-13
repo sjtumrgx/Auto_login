@@ -4,6 +4,7 @@
 
 ## 功能特性
 
+- 🌐 自动从永久发布页解析最新地址，无需手动更新域名
 - ⏰ 每天北京时间 08:00 自动执行
 - 🔐 敏感信息通过 GitHub Secrets 安全存储
 - 🔄 支持手动触发执行
@@ -47,6 +48,8 @@ python src/checkin.py
 # 或使用命令行参数
 python src/checkin.py -u your_email -p your_password
 ```
+
+脚本会先访问永久发布页 `http://www.soushu2030.com/`，自动跟随中间跳转并提取“最新地址”，再继续执行登录签到，因此网站换域名时通常不需要再手动修改代码。
 
 ## 执行时间说明
 
